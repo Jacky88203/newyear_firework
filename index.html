@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2025 跨年手势感应烟花</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Arial', sans-serif; }
+        #video-container { position: fixed; bottom: 10px; right: 10px; width: 120px; height: 90px; border-radius: 8px; overflow: hidden; border: 2px solid #fff; z-index: 100; }
+        #input_video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+        #ui-layer { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; text-align: center; pointer-events: none; z-index: 10; }
+        #countdown { font-size: 120px; font-weight: bold; text-shadow: 0 0 20px #ff00ea; display: none; }
+        #hint { position: fixed; bottom: 30px; width: 100%; text-align: center; color: rgba(255,255,255,0.7); }
+    </style>
+</head>
+<body>
+
+    <div id="video-container"><video id="input_video"></video></div>
+    <div id="ui-layer"><div id="countdown">3</div></div>
+    <div id="hint">✋ 张开手掌引燃烟火 | 🙆‍♂️ 双手过头比心开启回忆</div>
+
+    <script>
+        // --- 核心逻辑变量 ---
+        let isCounting = false;
+        let countdownNum = 3;
+        let lastPalmTime = 0;
+
+        // --- 烟花与3D场景初始化 (Three.js) ---
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // 模拟烟花函数
+        function launchFirework() {
+            // 这里集成您的烟花粒子系统代码
+            console.log("🎆 烟花绽放！");
+            document.body.style.backgroundColor = '#1a0033';
+            setTimeout(() => document.body.style.backgroundColor = '#000', 200);
+        }
+
+        // 触发回忆照片墙
+        function showMemoryLove() {
+            console.log("❤️ 触发隐藏彩蛋：3D旋转照片");
+            // 逻辑：创建一个旋转的 3D 照片环
+        }
+
+        // --- MediaPipe 手势检测 ---
+        const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+
+        hands.onResults((results) => {
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const hand1 = results.multiHandLandmarks[0];
+                
+                // 1. 检测张开手掌 (简化版：判断手指尖是否都在指根上方)
+                const isPalm = hand1[8].y < hand1[5].y && hand1[12].y < hand1[9].y;
+                
+                if (isPalm && !isCounting) {
+                    startCountdown();
+                }
+
+                // 2. 检测比心 (判断双手位置)
+                if (results.multiHandLandmarks.length === 2) {
+                    const hand2 = results.multiHandLandmarks[1];
+                    if (hand1[8].y < 0.3 && hand2[8].y < 0.3) { // 手部在屏幕上方
+                        showMemoryLove();
+                    }
+                }
+            }
+        });
+
+        function startCountdown() {
+            isCounting = true;
+            const el = document.getElementById('countdown');
+            el.style.display = 'block';
+            let timer = setInterval(() => {
+                el.innerText = countdownNum;
+                if (countdownNum <= 0) {
+                    clearInterval(timer);
+                    el.innerText = "HAPPY 2025!";
+                    launchFirework();
+                    setTimeout(() => { el.style.display = 'none'; isCounting = false; countdownNum = 3; }, 2000);
+                }
+                countdownNum--;
+            }, 1000);
+        }
+
+        const cameraFeed = new Camera(document.getElementById('input_video'), {
+            onFrame: async () => { await hands.send({image: document.getElementById('input_video')}); },
+            width: 640, height: 480
+        });
+        cameraFeed.start();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
