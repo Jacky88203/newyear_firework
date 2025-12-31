@@ -2,106 +2,191 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2026 跨年手势感应烟花</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>2026 跨年感应烟花</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: 'Arial', sans-serif; }
-        #video-container { position: fixed; bottom: 10px; right: 10px; width: 120px; height: 90px; border-radius: 8px; overflow: hidden; border: 2px solid #fff; z-index: 100; }
-        #input_video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
-        #ui-layer { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; text-align: center; pointer-events: none; z-index: 10; }
-        #countdown { font-size: 120px; font-weight: bold; text-shadow: 0 0 20px #ff00ea; display: none; }
-        #hint { position: fixed; bottom: 30px; width: 100%; text-align: center; color: rgba(255,255,255,0.7); }
+        body { margin: 0; background: #000; overflow: hidden; color: white; font-family: sans-serif; }
+        canvas { position: absolute; top: 0; left: 0; }
+        #video-preview { position: fixed; bottom: 20px; right: 20px; width: 100px; height: 75px; border: 2px solid rgba(255,255,255,0.5); border-radius: 10px; z-index: 100; transform: scaleX(-1); }
+        #ui { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; z-index: 200; }
+        #countdown { font-size: 8rem; font-weight: bold; background: linear-gradient(to bottom, #fff, #ffd700); -webkit-background-clip: text; -webkit-text-fill-color: transparent; display: none; }
+        #msg { position: fixed; bottom: 120px; width: 100%; text-align: center; font-size: 14px; opacity: 0.7; }
+        /* 3D 容器 */
+        #three-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
     </style>
 </head>
 <body>
 
-    <div id="video-container"><video id="input_video"></video></div>
-    <div id="ui-layer"><div id="countdown">3</div></div>
-    <div id="hint">✋ 张开手掌引燃烟火 | 🙆‍♂️ 双手过头比心开启回忆</div>
+<canvas id="fireworkCanvas"></canvas>
+<div id="three-container"></div>
+<video id="input_video" style="display:none"></video>
+<canvas id="video-preview"></canvas>
 
-    <script>
-        // --- 核心逻辑变量 ---
-        let isCounting = false;
-        let countdownNum = 3;
-        let lastPalmTime = 0;
+<div id="ui">
+    <div id="countdown">3</div>
+</div>
 
-        // --- 烟花与3D场景初始化 (Three.js) ---
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.body.appendChild(renderer.domElement);
+<div id="msg">✋ 张开手掌倒数引爆 | 🙆‍♂️ 双手比心触发回忆</div>
 
-        // 模拟烟花函数
-        function launchFirework() {
-            // 这里集成您的烟花粒子系统代码
-            console.log("🎆 烟花绽放！");
-            document.body.style.backgroundColor = '#1a0033';
-            setTimeout(() => document.body.style.backgroundColor = '#000', 200);
-        }
+<script>
+// --- 1. 声音引擎 (Web Audio API) ---
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+function playExplosionSound() {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+    gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.5);
+}
 
-        // 触发回忆照片墙
-        function showMemoryLove() {
-            console.log("❤️ 触发隐藏彩蛋：3D旋转照片");
-            // 逻辑：创建一个旋转的 3D 照片环
-        }
+// --- 2. 烟花粒子系统 ---
+const fwCanvas = document.getElementById('fireworkCanvas');
+const ctx = fwCanvas.getContext('2d');
+let particles = [];
+fwCanvas.width = window.innerWidth;
+fwCanvas.height = window.innerHeight;
 
-        // --- MediaPipe 手势检测 ---
-        const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
-        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+class Particle {
+    constructor(x, y, color) {
+        this.x = x; this.y = y; this.color = color;
+        this.vel = { x: (Math.random()-0.5)*10, y: (Math.random()-0.5)*10 };
+        this.alpha = 1; this.friction = 0.95; this.gravity = 0.2;
+    }
+    draw() {
+        ctx.globalAlpha = this.alpha;
+        ctx.beginPath(); ctx.arc(this.x, this.y, 2, 0, Math.PI*2);
+        ctx.fillStyle = this.color; ctx.fill();
+    }
+    update() {
+        this.vel.x *= this.friction; this.vel.y *= this.friction;
+        this.vel.y += this.gravity;
+        this.x += this.vel.x; this.y += this.vel.y;
+        this.alpha -= 0.01;
+    }
+}
 
-        hands.onResults((results) => {
-            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                const hand1 = results.multiHandLandmarks[0];
-                
-                // 1. 检测张开手掌 (简化版：判断手指尖是否都在指根上方)
-                const isPalm = hand1[8].y < hand1[5].y && hand1[12].y < hand1[9].y;
-                
-                if (isPalm && !isCounting) {
-                    startCountdown();
-                }
+function createFirework(x, y) {
+    playExplosionSound();
+    const colors = ['#ff0043', '#14ffeb', '#ffbe00', '#ff00ff', '#ffffff'];
+    const color = colors[Math.floor(Math.random()*colors.length)];
+    for(let i=0; i<80; i++) particles.push(new Particle(x, y, color));
+}
 
-                // 2. 检测比心 (判断双手位置)
-                if (results.multiHandLandmarks.length === 2) {
-                    const hand2 = results.multiHandLandmarks[1];
-                    if (hand1[8].y < 0.3 && hand2[8].y < 0.3) { // 手部在屏幕上方
-                        showMemoryLove();
-                    }
-                }
+// --- 3. Three.js 隐藏彩蛋 (旋转照片墙) ---
+const tScene = new THREE.Scene();
+const tCamera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+const tRenderer = new THREE.WebGLRenderer({ alpha: true });
+tRenderer.setSize(window.innerWidth, window.innerHeight);
+document.getElementById('three-container').appendChild(tRenderer.domElement);
+
+let photoGroup = new THREE.Group();
+tScene.add(photoGroup);
+tCamera.position.z = 5;
+
+// 创建虚拟照片块
+for(let i=0; i<8; i++) {
+    const geo = new THREE.PlaneGeometry(1.5, 1);
+    const mat = new THREE.MeshBasicMaterial({ 
+        color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0 
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    const angle = (i / 8) * Math.PI * 2;
+    mesh.position.set(Math.cos(angle)*3, 1, Math.sin(angle)*3);
+    mesh.rotation.y = -angle;
+    photoGroup.add(mesh);
+}
+
+function triggerHeartMemory() {
+    photoGroup.children.forEach(m => m.material.opacity = 0.8);
+    photoGroup.rotation.y += 0.02; // 开始旋转
+}
+
+// --- 4. 手势逻辑控制 ---
+let count = 3;
+let isCounting = false;
+const cdEl = document.getElementById('countdown');
+
+function startSequence() {
+    if(isCounting) return;
+    isCounting = true;
+    cdEl.style.display = 'block';
+    let timer = setInterval(() => {
+        cdEl.innerText = count;
+        if(count <= 0) {
+            clearInterval(timer);
+            cdEl.innerText = "2026 🚀";
+            for(let i=0; i<5; i++) {
+                setTimeout(() => createFirework(Math.random()*fwCanvas.width, Math.random()*fwCanvas.height*0.5), i*300);
             }
-        });
-
-        function startCountdown() {
-            isCounting = true;
-            const el = document.getElementById('countdown');
-            el.style.display = 'block';
-            let timer = setInterval(() => {
-                el.innerText = countdownNum;
-                if (countdownNum <= 0) {
-                    clearInterval(timer);
-                    el.innerText = "HAPPY 2026!";
-                    launchFirework();
-                    setTimeout(() => { el.style.display = 'none'; isCounting = false; countdownNum = 3; }, 2000);
-                }
-                countdownNum--;
-            }, 1000);
+            setTimeout(() => { cdEl.style.display='none'; isCounting=false; count=3; }, 2000);
         }
+        count--;
+    }, 1000);
+}
 
-        const cameraFeed = new Camera(document.getElementById('input_video'), {
-            onFrame: async () => { await hands.send({image: document.getElementById('input_video')}); },
-            width: 640, height: 480
-        });
-        cameraFeed.start();
+// --- 5. MediaPipe 配置 ---
+const videoElement = document.getElementById('input_video');
+const previewCanvas = document.getElementById('video-preview');
+const pCtx = previewCanvas.getContext('2d');
 
-        function animate() {
-            requestAnimationFrame(animate);
-            renderer.render(scene, camera);
+const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5 });
+hands.onResults(results => {
+    // 实时预览绘制
+    pCtx.clearRect(0,0,100,75);
+    pCtx.drawImage(results.image, 0,0, 100,75);
+
+    if (results.multiHandLandmarks.length > 0) {
+        const hand1 = results.multiHandLandmarks[0];
+        // 检测张开手掌 (指尖 y 小于 关节 y)
+        const isPalm = hand1[8].y < hand1[6].y && hand1[12].y < hand1[10].y;
+        if(isPalm) startSequence();
+
+        // 隐藏功能：比心检测（简单逻辑：两只手都在上方且靠拢）
+        if (results.multiHandLandmarks.length === 2) {
+            const hand2 = results.multiHandLandmarks[1];
+            if(hand1[8].y < 0.4 && hand2[8].y < 0.4) {
+                triggerHeartMemory();
+            }
         }
-        animate();
-    </script>
+    }
+});
+
+const camera = new Camera(videoElement, {
+    onFrame: async () => { await hands.send({image: videoElement}); },
+    width: 640, height: 480
+});
+camera.start();
+
+// --- 6. 动画循环 ---
+function animate() {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+    ctx.fillRect(0, 0, fwCanvas.width, fwCanvas.height);
+    particles.forEach((p, i) => {
+        p.update(); p.draw();
+        if(p.alpha <= 0) particles.splice(i, 1);
+    });
+    tRenderer.render(tScene, tCamera);
+    requestAnimationFrame(animate);
+}
+animate();
+
+// 适配窗口
+window.addEventListener('resize', () => {
+    fwCanvas.width = window.innerWidth; fwCanvas.height = window.innerHeight;
+    tCamera.aspect = window.innerWidth/window.innerHeight;
+    tCamera.updateProjectionMatrix();
+    tRenderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
 </body>
-
 </html>
